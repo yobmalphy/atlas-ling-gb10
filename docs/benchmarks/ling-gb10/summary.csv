@@ -1,0 +1,4 @@
+model,passed,total,median_tps,median_ttft_ms,accepted_drafts,length_cutoffs
+ling-3.0-flash-nvfp4-mtp-k2,7,8,14.17,25966.8,6428,1
+qwen3.8-27b-nvfp4-mtp-k4,5,8,15.77,660.6,2717,1
+ornith-1.5-35b-nvfp4-mtp-k2,4,8,107.66,225.6,3490,3

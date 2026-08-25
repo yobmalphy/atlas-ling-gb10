@@ -1,6 +1,19 @@
 <p align="center">
   <img src="assets/logo.svg" alt="Atlas Inference Engine" width="640" />
 </p>
+
+> [!IMPORTANT]
+> **Ling 3.0 Flash on NVIDIA GB10.** This public AGPL derivative adds native
+> Bailing Hybrid KDA/MLA, NVFP4, 512-expert MoE, and MTP support for
+> `kingjones777/Ling-3.0-flash-NVFP4-SGLang-MTP`. Start with the
+> [GB10 deployment guide](docs/LING3_GB10.md), review the
+> [benchmark report and charts](docs/benchmarks/ling-gb10/README.md), and see
+> [MODIFICATIONS.md](MODIFICATIONS.md) for provenance. Model weights are not
+> included.
+
+> This repository was modified on 2026-08-25 from Atlas commit
+> [`a046cdfd`](https://github.com/Avarok-Cybersecurity/atlas/commit/a046cdfdead4b75dc43f6ec346b04733d136d081).
+> The complete corresponding source is this repository under AGPL-3.0-only.
 <p align="center">
   <h1 align="center">Atlas Inference Engine</h1>
   <p align="center">
