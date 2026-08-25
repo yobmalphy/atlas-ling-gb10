@@ -1017,7 +1017,7 @@ html&gt;body{padding:0}&lt;/style&gt;
   if (!root) return;
 
   const models = [
-    { name: &quot;Ling 3.0&quot;, key: &quot;ling&quot;, passed: 7, tps: 14.17, ttft: 25966.8 },
+    { name: &quot;Ling 3.0 Flash&quot;, key: &quot;ling&quot;, passed: 7, tps: 14.17, ttft: 25966.8 },
     { name: &quot;Qwen 27B&quot;, key: &quot;qwen&quot;, passed: 5, tps: 15.77, ttft: 660.6 },
     { name: &quot;Ornith 35B&quot;, key: &quot;ornith&quot;, passed: 4, tps: 107.66, ttft: 225.6 }
   ];
@@ -1076,7 +1076,7 @@ html&gt;body{padding:0}&lt;/style&gt;
       class: &quot;benchmark-chart&quot;,
       viewBox: `0 0 ${width} ${height}`,
       role: &quot;img&quot;,
-      &quot;aria-label&quot;: `${metric.axis}: Ling ${metric.format(models[0][metricKey])}, Qwen ${metric.format(models[1][metricKey])}, Ornith ${metric.format(models[2][metricKey])}`
+      &quot;aria-label&quot;: `${metric.axis}: ${models.map(model =&gt; `${model.name} ${metric.format(model[metricKey])}`).join(&quot;, &quot;)}`
     });
 
     const title = makeSvgElement(&quot;title&quot;);

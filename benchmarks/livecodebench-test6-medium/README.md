@@ -26,7 +26,7 @@ its SHA-256 differs.
 
 | Label | Hugging Face checkpoint | Revision | MTP drafts |
 |---|---|---|---:|
-| Ling 3.0 | `kingjones777/Ling-3.0-flash-NVFP4-SGLang-MTP` | `8d10afa56d671e97d73285708bd29f6014161913` | 1 (K=2) |
+| Ling 3.0 Flash | `kingjones777/Ling-3.0-flash-NVFP4-SGLang-MTP` | `8d10afa56d671e97d73285708bd29f6014161913` | 1 (K=2) |
 | Qwen 3.8 27B | `unsloth/Qwen3.8-27B-NVFP4` | `7d6f8d4d72f56b92b3cdbf22f156b90e1bab0108` | 3 (K=4) |
 | Ornith 1.5 35B | `ornith-ai/Ornith-1.5-35B-A3B-NVFP4` | `0f0b1b59b879ccde1353e6ebd0fb10c204d4c544` | 1 (K=2) |
 

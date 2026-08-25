@@ -1,4 +1,4 @@
-# Ling 3.0 vs Qwen 3.8 27B vs Ornith 1.5 35B
+# Ling 3.0 Flash vs Qwen 3.8 27B vs Ornith 1.5 35B
 
 Generated: 2026-08-25T19:33:36.847632+00:00
 
