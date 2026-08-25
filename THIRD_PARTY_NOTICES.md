@@ -27,5 +27,12 @@ production deployment.
 ## Benchmark dataset
 
 - LiveCodeBench: <https://github.com/LiveCodeBench/LiveCodeBench>
+- Qwen benchmark checkpoint:
+  <https://huggingface.co/unsloth/Qwen3.8-27B-NVFP4>
+- Ornith benchmark checkpoint:
+  <https://huggingface.co/ornith-ai/Ornith-1.5-35B-A3B-NVFP4>
 - The published charts contain task identifiers and measurements, not copied
   prompts, tests, or model reasoning traces.
+
+Exact revisions and the test-data hash are pinned in
+`benchmarks/livecodebench-test6-medium/README.md`.

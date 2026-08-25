@@ -22,7 +22,11 @@ results as a useful stress test, not a statistically broad ranking.
 - [Interactive chart](three-model-coding-benchmark.html)
 - [Full aggregate and per-task report](THREE_MODEL_REPORT.md)
 - [Machine-readable summary](summary.csv)
+- [Reproduce this exact second test](../../../benchmarks/livecodebench-test6-medium/README.md)
 
 TPS is post-first-token generation throughput. TTFT is time to first token, so
 lower is better. No private network addresses, copied task prompts, tests, or
 model reasoning traces are included.
+
+Only this second, eight-task test is included in the public repository. The
+earlier mixed benchmark is intentionally excluded.

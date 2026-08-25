@@ -1,5 +1,7 @@
 # Build artifacts
 target/
+benchmarks/livecodebench-test6-medium/.cache/
+benchmark-results/
 **/target/
 # Out-of-tree cargo target dirs used for parallel/experiment builds
 # (target-final, target-fu, target-i84, target-phc, target-rc, ...).
