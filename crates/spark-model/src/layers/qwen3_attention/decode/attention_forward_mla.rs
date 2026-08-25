@@ -72,6 +72,9 @@ impl Qwen3AttentionLayer {
         let mla_v_dim = mla.v_dim as u32;
         let mla_rope = mla.rope as u32;
         let profile = ctx.profile;
+        let ling_diag = !ctx.graph_capture
+            && self.attn_layer_idx == 0
+            && std::env::var("ATLAS_LING_MLA_DIAG").is_ok_and(|value| value == "1");
         macro_rules! prof {
             ($label:expr, $body:expr) => {{
                 if profile {
@@ -86,8 +89,11 @@ impl Qwen3AttentionLayer {
             }};
         }
 
-        // Step 1: Q latent → norm → expand
+        // Step 1: latent MLA, or Ling's direct full-Q projection.
         let q_latent = ctx.buffers.ssm_ba();
+        let q_full = ctx.buffers.ssm_deinterleaved();
+        let q_first_out = if mla.direct_q { q_full } else { q_latent };
+        let q_first_dim = if mla.direct_q { q_dim } else { q_lora };
         prof!("wq_a", {
             if let Some(ref wqa_nvfp4) = mla.wq_a_nvfp4 {
                 self.nvfp4_decode_gemv(
@@ -95,8 +101,8 @@ impl Qwen3AttentionLayer {
                     ctx.levers.gemv_sw,
                     normed,
                     wqa_nvfp4,
-                    q_latent,
-                    q_lora,
+                    q_first_out,
+                    q_first_dim,
                     h,
                     stream,
                 )
@@ -106,52 +112,62 @@ impl Qwen3AttentionLayer {
                     self.dense_gemv_k,
                     normed,
                     &mla.wq_a,
-                    q_latent,
-                    q_lora,
+                    q_first_out,
+                    q_first_dim,
                     h,
                     stream,
                 )
             }
         })?;
-        prof!("q_norm", {
-            ops::rms_norm(
+        if ling_diag {
+            super::super::trait_impl::diag_norm(
                 ctx.gpu,
-                self.rms_norm_w_k,
-                q_latent,
-                &mla.q_a_norm,
-                q_latent,
-                1,
-                q_lora,
-                eps,
+                q_full,
+                q_dim as usize,
                 stream,
-            )
-        })?;
-        let q_full = ctx.buffers.ssm_deinterleaved();
-        prof!("wq_b", {
-            if let Some(ref wqb_nvfp4) = mla.wq_b_nvfp4 {
-                self.nvfp4_decode_gemv(
+                "Ling MLA q_full",
+            );
+        }
+        if !mla.direct_q {
+            prof!("q_norm", {
+                ops::rms_norm(
                     ctx.gpu,
-                    ctx.levers.gemv_sw,
+                    self.rms_norm_w_k,
                     q_latent,
-                    wqb_nvfp4,
-                    q_full,
-                    q_dim,
+                    &mla.q_a_norm,
+                    q_latent,
+                    1,
                     q_lora,
+                    eps,
                     stream,
                 )
-            } else {
-                ops::dense_gemv(
-                    ctx.gpu,
-                    self.dense_gemv_k,
-                    q_latent,
-                    &mla.wq_b,
-                    q_full,
-                    q_dim,
-                    q_lora,
-                    stream,
-                )
-            }
-        })?;
+            })?;
+            prof!("wq_b", {
+                if let Some(ref wqb_nvfp4) = mla.wq_b_nvfp4 {
+                    self.nvfp4_decode_gemv(
+                        ctx.gpu,
+                        ctx.levers.gemv_sw,
+                        q_latent,
+                        wqb_nvfp4,
+                        q_full,
+                        q_dim,
+                        q_lora,
+                        stream,
+                    )
+                } else {
+                    ops::dense_gemv(
+                        ctx.gpu,
+                        self.dense_gemv_k,
+                        q_latent,
+                        &mla.wq_b,
+                        q_full,
+                        q_dim,
+                        q_lora,
+                        stream,
+                    )
+                }
+            })?;
+        }
 
         // Step 2: Q_absorbed via batched GEMV
         let mla_cache_dim = kv_lora + mla_rope;
@@ -194,6 +210,15 @@ impl Qwen3AttentionLayer {
                 Ok(())
             }
         })?;
+        if ling_diag {
+            super::super::trait_impl::diag_norm(
+                ctx.gpu,
+                q_absorbed_buf,
+                (nq * mla_cache_dim) as usize,
+                stream,
+                "Ling MLA q_absorbed_no_rope",
+            );
+        }
 
         // Q_rope scatter
         let q_rope_direct = ctx.buffers.ssm_conv_out_f32();
@@ -233,7 +258,6 @@ impl Qwen3AttentionLayer {
                 Ok(())
             }
         })?;
-
         // Step 3: KV latent → norm
         let kv_latent = ctx.buffers.expert_gate_out();
         prof!("wkv_a+norm", {
@@ -272,6 +296,15 @@ impl Qwen3AttentionLayer {
                 stream,
             )
         })?;
+        if ling_diag {
+            super::super::trait_impl::diag_norm(
+                ctx.gpu,
+                kv_latent,
+                kv_lora as usize,
+                stream,
+                "Ling MLA kv_latent",
+            );
+        }
 
         // Step 4: K_rope + RoPE + writeback
         let k_rope_single = ctx.buffers.ssm_ba();
@@ -288,7 +321,11 @@ impl Qwen3AttentionLayer {
             )?;
             ops::rope_yarn(
                 ctx.gpu,
-                self.rope_yarn_k,
+                if mla.direct_q {
+                    self.rope_yarn_interleaved_k
+                } else {
+                    self.rope_yarn_k
+                },
                 q_rope_direct,
                 k_rope_single,
                 meta.positions,
@@ -298,7 +335,7 @@ impl Qwen3AttentionLayer {
                 mla_rope,
                 mla_rope,
                 mla.yarn_inv_freq,
-                ctx.config.rope_theta as f32,
+                super::super::helpers::yarn_rope_mscale(ctx.config),
                 stream,
             )?;
             if self.mla_q_rope_writeback_k.0 != 0 {
@@ -323,6 +360,22 @@ impl Qwen3AttentionLayer {
                 Ok(())
             }
         })?;
+        if ling_diag {
+            super::super::trait_impl::diag_norm(
+                ctx.gpu,
+                q_absorbed_buf,
+                (nq * mla_cache_dim) as usize,
+                stream,
+                "Ling MLA q_absorbed_rope",
+            );
+            super::super::trait_impl::diag_norm(
+                ctx.gpu,
+                k_rope_single,
+                mla_rope as usize,
+                stream,
+                "Ling MLA k_rope",
+            );
+        }
 
         // Step 6: Cache assemble + write
         let k_cache_entry = k_out;
@@ -375,7 +428,6 @@ impl Qwen3AttentionLayer {
                 ctx.graph_capture,
             )
         })?;
-
         // Step 8: Paged decode attention
         let attn_out = ctx.buffers.attn_output();
         let inv_sqrt_d = self.effective_attn_scale(hd);
@@ -401,6 +453,49 @@ impl Qwen3AttentionLayer {
                 stream,
             )
         })?;
+        if ling_diag {
+            super::super::trait_impl::diag_norm(
+                ctx.gpu,
+                attn_out,
+                (nq * mla_cache_dim) as usize,
+                stream,
+                "Ling MLA attn_latent",
+            );
+        }
+
+        // Compute Ling's per-head gate before V extraction. `v_extracted`
+        // intentionally reuses `norm_output`, which is also the `normed`
+        // input buffer for this layer; projecting the gate afterwards would
+        // read the extracted values instead of the normalized hidden state.
+        let head_gate = if mla.direct_q {
+            if let Some(ref gate_weight) = self.head_gate_weight {
+                let gate = q_full;
+                ops::dense_gemv(
+                    ctx.gpu,
+                    self.dense_gemv_k,
+                    normed,
+                    gate_weight,
+                    gate,
+                    nq,
+                    h,
+                    stream,
+                )?;
+                if ling_diag {
+                    super::super::trait_impl::diag_norm(
+                        ctx.gpu,
+                        gate,
+                        nq as usize,
+                        stream,
+                        "Ling MLA head_gate",
+                    );
+                }
+                Some(gate)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
 
         // Step 9: V extraction (batched GEMV)
         let v_extracted = ctx.buffers.norm_output();
@@ -442,6 +537,38 @@ impl Qwen3AttentionLayer {
                 Ok(())
             }
         })?;
+        if ling_diag {
+            super::super::trait_impl::diag_norm(
+                ctx.gpu,
+                v_extracted,
+                (nq * mla_v_dim) as usize,
+                stream,
+                "Ling MLA v_extracted",
+            );
+        }
+
+        if let Some(gate) = head_gate {
+            ops::sigmoid_gate_mul_head_broadcast(
+                ctx.gpu,
+                self.sigmoid_gate_head_broadcast_k,
+                v_extracted,
+                gate,
+                v_extracted,
+                nq,
+                mla_v_dim,
+                1,
+                stream,
+            )?;
+            if ling_diag {
+                super::super::trait_impl::diag_norm(
+                    ctx.gpu,
+                    v_extracted,
+                    (nq * mla_v_dim) as usize,
+                    stream,
+                    "Ling MLA v_gated",
+                );
+            }
+        }
 
         // Step 10: O projection
         let o_out = ctx.buffers.qkv_output();
@@ -470,6 +597,15 @@ impl Qwen3AttentionLayer {
                 )
             }
         })?;
+        if ling_diag {
+            super::super::trait_impl::diag_norm(
+                ctx.gpu,
+                o_out,
+                h as usize,
+                stream,
+                "Ling MLA o_out",
+            );
+        }
 
         Ok(o_out)
     }

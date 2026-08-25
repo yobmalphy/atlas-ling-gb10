@@ -64,42 +64,46 @@ impl Qwen3AttentionLayer {
         let mla_v_dim = mla.v_dim as u32;
         let mla_rope = mla.rope as u32;
 
-        // Q: latent → norm → expand → [N, nq*hd] in [nope|rope] per head
+        // Q: latent MLA, or Ling direct-Q, into [N, nq*hd].
         let q_latent = ctx.buffers.ssm_ba();
+        let qg_out = ctx.buffers.qkv_output();
+        let q_first_out = if mla.direct_q { qg_out } else { q_latent };
+        let q_first_dim = if mla.direct_q { nq * hd } else { q_lora };
         ops::dense_gemm(
             ctx.gpu,
             self.dense_gemm_k,
             normed,
             &mla.wq_a,
-            q_latent,
+            q_first_out,
             n,
-            q_lora,
+            q_first_dim,
             h,
             stream,
         )?;
-        ops::rms_norm(
-            ctx.gpu,
-            self.rms_norm_w_k,
-            q_latent,
-            &mla.q_a_norm,
-            q_latent,
-            n,
-            q_lora,
-            eps,
-            stream,
-        )?;
-        let qg_out = ctx.buffers.qkv_output();
-        ops::dense_gemm(
-            ctx.gpu,
-            self.dense_gemm_k,
-            q_latent,
-            &mla.wq_b,
-            qg_out,
-            n,
-            nq * hd,
-            q_lora,
-            stream,
-        )?;
+        if !mla.direct_q {
+            ops::rms_norm(
+                ctx.gpu,
+                self.rms_norm_w_k,
+                q_latent,
+                &mla.q_a_norm,
+                q_latent,
+                n,
+                q_lora,
+                eps,
+                stream,
+            )?;
+            ops::dense_gemm(
+                ctx.gpu,
+                self.dense_gemm_k,
+                q_latent,
+                &mla.wq_b,
+                qg_out,
+                n,
+                nq * hd,
+                q_lora,
+                stream,
+            )?;
+        }
 
         // KV: latent → norm → expand
         let kv_latent = ctx.buffers.expert_gate_out();
@@ -171,7 +175,11 @@ impl Qwen3AttentionLayer {
         let rope_meta = ctx.attn_metadata.expect("MLA prefill requires metadata");
         ops::rope_yarn(
             ctx.gpu,
-            self.rope_yarn_k,
+            if mla.direct_q {
+                self.rope_yarn_interleaved_k
+            } else {
+                self.rope_yarn_k
+            },
             q_rope_tmp,
             k_rope_buf,
             rope_meta.positions,
@@ -181,7 +189,7 @@ impl Qwen3AttentionLayer {
             mla_rope,
             mla_rope,
             mla.yarn_inv_freq,
-            ctx.config.rope_theta as f32,
+            super::super::helpers::yarn_rope_mscale(ctx.config),
             stream,
         )?;
         ops::mla_q_rope_writeback_batched(
@@ -278,30 +286,72 @@ impl Qwen3AttentionLayer {
             stream,
         )?;
 
-        // O projection: [N, nq*hd] → [N, H]
+        // Ling pads V to qk head width for attention, then compacts and gates it.
+        let o_input = if mla.direct_q {
+            let gate = qg_out;
+            let compact = ctx.buffers.expert_up_out();
+            ops::dense_gemm(
+                ctx.gpu,
+                self.dense_gemm_k,
+                normed,
+                self.head_gate_weight
+                    .as_ref()
+                    .expect("Ling MLA requires head-wise g_proj"),
+                gate,
+                n,
+                nq,
+                h,
+                stream,
+            )?;
+            let total = n * nq * mla_v_dim;
+            spark_runtime::kernel_args::KernelLaunch::new(
+                ctx.gpu,
+                ctx.gpu.kernel("kda", "ling_mla_compact_gate")?,
+            )
+            .grid([total.div_ceil(256), 1, 1])
+            .block([256, 1, 1])
+            .arg_ptr(attn_out)
+            .arg_ptr(gate)
+            .arg_ptr(compact)
+            .arg_u32(n)
+            .arg_u32(nq)
+            .arg_u32(hd)
+            .arg_u32(mla_v_dim)
+            .launch(stream)?;
+            compact
+        } else {
+            attn_out
+        };
+        let o_dim = if mla.direct_q {
+            nq * mla_v_dim
+        } else {
+            nq * hd
+        };
+
+        // O projection: [N, nq*v_dim] → [N, H]
         let o_out = ctx.buffers.norm_output();
         if let Some(ref wo_nvfp4) = mla.wo_nvfp4 {
             ops::w4a16_gemm(
                 ctx.gpu,
                 self.w4a16_gemm_k,
-                attn_out,
+                o_input,
                 wo_nvfp4,
                 o_out,
                 n,
                 h,
-                nq * hd,
+                o_dim,
                 stream,
             )?;
         } else {
             ops::dense_gemm(
                 ctx.gpu,
                 self.dense_gemm_k,
-                attn_out,
+                o_input,
                 &mla.wo,
                 o_out,
                 n,
                 h,
-                nq * hd,
+                o_dim,
                 stream,
             )?;
         }

@@ -351,6 +351,13 @@ exists solely in nemotron-labs-3-puzzle-75b-a9b. Dispatch
 (qwen3_attention/init.rs) falls back to w4a4_gemm — same family the
 27B declares. UNMEASURED for this target."""
 
+[expected_absent.kda]
+ling_silu_mul_clamped = """
+MoeLayer construction probes the optional Ling clamped-SwiGLU activation,
+but Qwen3.6/Ornith clamp limits remain zero and every activation dispatches
+the resolved standard moe_silu_mul kernel. The Ling-only handle is guarded by
+those limits before use, so this is a non-live compatibility probe."""
+
 [expected_absent.moe_w4a16]
 moe_w4a16_grouped_gemm_ptrtable_e8m0 = """
 Native-MXFP4 (E8M0) scale-format variant. Shipped only in

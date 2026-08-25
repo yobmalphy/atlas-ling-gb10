@@ -16,6 +16,9 @@ impl MoeLayer {
         ctx: &ForwardContext,
         stream: u64,
     ) -> Result<()> {
+        if self.routed_swiglu_limit > 0.0 || self.shared_swiglu_limit > 0.0 {
+            return self.forward_prefill(input, num_tokens, ctx, stream);
+        }
         // SOLID Incr-4: batched decode folds the routed-expert gate/up + down
         // LoRA delta per token (below) AND the router (mlp.gate) delta on the
         // whole-batch gate_logits before top-k (`apply_router_lora_batched`,

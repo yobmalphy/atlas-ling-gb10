@@ -15,6 +15,9 @@ impl MoeLayer {
         ctx: &ForwardContext,
         stream: u64,
     ) -> Result<()> {
+        if self.routed_swiglu_limit > 0.0 || self.shared_swiglu_limit > 0.0 {
+            return self.forward_prefill(input, 3, ctx, stream);
+        }
         // Feature-1: a resident MoE adapter forces the per-row batched fallback
         // (folds gate/up/down route-agnostically; base rows no-op; same
         // moe_output[3,H]), skipping any no-fold fast path. Install-time gate →

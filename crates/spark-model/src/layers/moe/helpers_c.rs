@@ -218,13 +218,13 @@ impl MoeLayer {
             shared_intermediate,
             hidden_size,
         )?;
-        ops::silu_mul(
-            ctx.gpu,
-            self.moe_act_mul,
+        self.activate(
             gate_out,
             up_out,
             gate_out,
             num_tokens * shared_intermediate,
+            self.shared_swiglu_limit,
+            ctx,
             stream,
         )?;
         project(

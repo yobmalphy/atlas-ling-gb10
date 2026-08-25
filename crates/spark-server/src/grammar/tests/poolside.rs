@@ -22,6 +22,19 @@ fn poolside_grammar_accepts_native_call() {
 }
 
 #[test]
+fn poolside_grammar_rejects_repeated_declared_parameter() {
+    let mut engine = GrammarEngine::new(&test_vocab(), &[130]).unwrap();
+    let compiled = engine
+        .compile_poolside_v1_tool_grammar(&test_tool_defs(), true, "</arg_value>")
+        .expect("compile must succeed");
+    let repeated = "<tool_call>get_weather<arg_key>location</arg_key>\
+                    <arg_value>Boston</arg_value><arg_key>location</arg_key>\
+                    <arg_value>Boston</arg_value></tool_call>";
+
+    assert!(!grammar_accepts(&compiled, repeated));
+}
+
+#[test]
 fn poolside_grammar_rejects_malformed_argument_close() {
     let mut engine = GrammarEngine::new(&test_vocab(), &[130]).unwrap();
     let compiled = engine

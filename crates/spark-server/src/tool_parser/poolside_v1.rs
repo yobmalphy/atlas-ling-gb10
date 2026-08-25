@@ -98,7 +98,7 @@ pub(super) fn parse_poolside_v1_call(text: &str) -> Option<ToolCall> {
         rest = rest.strip_prefix("<arg_key>")?;
         let key_end = rest.find("</arg_key>")?;
         let key = rest[..key_end].trim();
-        if !is_tool_name_component(key) || args.contains_key(key) {
+        if !is_tool_name_component(key) {
             return None;
         }
         rest = &rest[key_end + "</arg_key>".len()..];
@@ -107,7 +107,16 @@ pub(super) fn parse_poolside_v1_call(text: &str) -> Option<ToolCall> {
         let raw_value = &rest[..value_end];
         let value = serde_json::from_str(raw_value)
             .unwrap_or_else(|_| serde_json::Value::String(raw_value.to_string()));
-        args.insert(key.to_string(), value);
+        if let Some(previous) = args.get(key) {
+            // Defensive recovery for outputs produced without the bounded
+            // grammar: identical repeats carry no new information and are
+            // safe to collapse. Conflicting duplicate values remain invalid.
+            if previous != &value {
+                return None;
+            }
+        } else {
+            args.insert(key.to_string(), value);
+        }
         rest = &rest[value_end + "</arg_value>".len()..];
     }
 
@@ -158,6 +167,17 @@ mod tests {
         );
 
         assert!(call.is_none());
+    }
+
+    #[test]
+    fn collapses_identical_duplicate_argument_keys() {
+        let call = parse_poolside_v1_call(
+            "get_weather<arg_key>city</arg_key><arg_value>Boston</arg_value>\
+             <arg_key>city</arg_key><arg_value>Boston</arg_value>",
+        )
+        .expect("identical duplicate is recoverable");
+
+        assert_eq!(call.function.arguments, r#"{"city":"Boston"}"#);
     }
 
     #[test]

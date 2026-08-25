@@ -40,9 +40,12 @@ COPY jinja-templates/ jinja-templates/
 # full-tree local build succeeds. Copy just the fixtures, not all of tests/.
 COPY tests/fixtures/ tests/fixtures/
 
-ENV ATLAS_TARGET_HW=gb10
-ENV ATLAS_TARGET_MODEL=*
-ENV ATLAS_TARGET_QUANT=*
+ARG ATLAS_TARGET_HW=gb10
+ARG ATLAS_TARGET_MODEL=*
+ARG ATLAS_TARGET_QUANT=*
+ENV ATLAS_TARGET_HW=${ATLAS_TARGET_HW}
+ENV ATLAS_TARGET_MODEL=${ATLAS_TARGET_MODEL}
+ENV ATLAS_TARGET_QUANT=${ATLAS_TARGET_QUANT}
 
 RUN cargo build --release -p spark-server
 

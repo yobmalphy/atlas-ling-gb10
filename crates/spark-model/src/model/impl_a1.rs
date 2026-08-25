@@ -187,8 +187,17 @@ impl TransformerModel {
         // main head (NVFP4 default) or the draft-only head built when the main
         // head is BF16. `draft_lm_head_nvfp4` resolves to whichever is present.
         let draft_lm_head_nvfp4 = mtp_lm_head_nvfp4.or(lm_head_nvfp4);
+        // Some architecturally distinct proposers are installed by the
+        // factory after `TransformerModel::new` (Ling physical NEXTN,
+        // DeepSeek-V4 MTP, and DFlash). Reserve target-side verify state now;
+        // waiting for `self.proposer` would leave recurrent checkpoint pools
+        // empty and the first speculative sequence would index them.
+        let external_proposer_expected = use_speculative
+            && config.model_type == "bailing_hybrid"
+            && config.num_nextn_predict_layers > 0;
         let has_mtp = self_speculative
             || (use_speculative && !mtp_weights.is_empty() && draft_lm_head_nvfp4.is_some())
+            || external_proposer_expected
             || dflash_kgamma > 0;
         let num_intermediates = if has_mtp {
             (num_drafts + 1).max(dflash_kgamma)
@@ -386,7 +395,7 @@ impl TransformerModel {
         // the K-vs-batch ladder envelope, SSOT in `crate::layer`). Only
         // meaningful with an MTP proposer — NULL otherwise (the batched
         // verify path self-gates on it via can_batch_verify).
-        let verify_hidden_stash = if proposer.is_some() {
+        let verify_hidden_stash = if has_mtp {
             gpu.alloc(crate::layer::VERIFY_WY_TABLE_SEQS * config.hidden_size * 2)?
         } else {
             DevicePtr::NULL
@@ -395,7 +404,7 @@ impl TransformerModel {
         // graph stability; contents refreshed pre-graph every batched verify
         // step). One [h|Hi0|Hi1|Hi2] x 4-entry slice per GDN layer — ~6 KB.
         // NULL without an MTP proposer or on non-SSM models (path self-gates).
-        let verify_wy_tables = if proposer.is_some() && config.num_ssm_layers() > 0 {
+        let verify_wy_tables = if has_mtp && config.num_ssm_layers() > 0 {
             let bytes = config.num_ssm_layers() * crate::layer::VERIFY_WY_LAYER_STRIDE_BYTES;
             let buf = gpu.alloc(bytes)?;
             gpu.memset(buf, 0, bytes)?;

@@ -3,6 +3,7 @@
 //! Per-model-family JSON parsers, split out of `config.rs` for file-size
 //! budget.
 
+mod bailing;
 mod deepseek_v4;
 mod gemma4;
 mod laguna;
@@ -13,6 +14,7 @@ mod quantization;
 mod step3p7;
 mod vision;
 
+pub(crate) use bailing::parse_bailing_hybrid;
 pub(crate) use deepseek_v4::parse_deepseek_v4;
 pub(crate) use gemma4::parse_gemma4_params;
 pub(crate) use laguna::parse_laguna;

@@ -21,6 +21,9 @@ impl MoeLayer {
         ctx: &ForwardContext,
         stream: u64,
     ) -> Result<()> {
+        if self.routed_swiglu_limit > 0.0 || self.shared_swiglu_limit > 0.0 {
+            return self.forward_prefill(input, 2, ctx, stream);
+        }
         // Feature-1: the fused batch2 fast path has no fold hook. When a MoE
         // adapter is RESIDENT (install-time-fixed → graph-safe; graphs drain on
         // rotate/swap), route to the per-row batched fallback which folds

@@ -120,6 +120,10 @@ impl ModelConfig {
 
     /// SSM beta+alpha projection output size.
     pub fn ssm_ba_size(&self) -> usize {
+        if self.model_type == "bailing_hybrid" {
+            return self.linear_num_value_heads * self.linear_value_head_dim
+                + self.linear_num_value_heads;
+        }
         // beta: num_value_heads, alpha: num_value_heads
         self.linear_num_value_heads * 2
     }

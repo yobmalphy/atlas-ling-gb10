@@ -742,6 +742,7 @@ impl GrammarEngine {
             };
 
             let param_names = schema_param_names(&schema);
+            let max_pairs = param_names.as_ref().map(Vec::len);
             let paramname_rule = match param_names.as_ref() {
                 Some(names) if !names.is_empty() => {
                     let alternatives = names
@@ -757,8 +758,19 @@ impl GrammarEngine {
             let content = if has_no_parameters {
                 serde_json::json!({"type": "const_string", "value": ""})
             } else {
+                // A schema with N declared properties can carry at most N
+                // argument pairs. The former unbounded `pair*` let a greedy
+                // model repeat the same valid key forever; because every
+                // repetition was grammar-valid, it ran to max_tokens and the
+                // parser correctly rejected the duplicate-key object. Bound
+                // the sequence when the schema gives us an exact ceiling.
+                // Unknown/additional-property schemas retain `pair*`.
+                let root = match max_pairs {
+                    Some(n) if n > 0 => format!("pair{}", " pair?".repeat(n - 1)),
+                    _ => "pair pair*".to_string(),
+                };
                 let body_ebnf = format!(
-                    "root ::= pair pair*\n\
+                    "root ::= {root}\n\
                      pair ::= \"<arg_key>\" paramname \"</arg_key><arg_value>\" value \"{value_close}\"\n\
                      {paramname_rule}\n\
                      value ::= value_part*\n\

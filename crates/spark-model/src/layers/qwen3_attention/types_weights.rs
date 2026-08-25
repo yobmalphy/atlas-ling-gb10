@@ -13,6 +13,8 @@ use crate::weight_map::{DenseWeight, QuantizedWeight};
 /// MLA does: `input × wq_a → latent[q_lora]` → `norm` → `latent × wq_b → Q`.
 /// This preserves the latent normalization that's critical for output quality.
 pub struct MlaWeights {
+    /// Direct full-Q projection (Ling/Bailing). Existing MLA families keep false.
+    pub direct_q: bool,
     pub wq_a: DenseWeight, // [q_lora, h] — Q down-projection (BF16)
     pub wq_a_nvfp4: Option<QuantizedWeight>, // NVFP4 for fast decode
     /// Native block-scaled FP8 weight (the checkpoint ships these projections as

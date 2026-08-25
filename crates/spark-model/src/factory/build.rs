@@ -196,10 +196,27 @@ pub fn build_model(
             None
         };
 
+    let bailing_mtp_module =
+        if config.model_type == "bailing_hybrid" && use_speculative && config.ep_rank == 0 {
+            match crate::weight_loader::bailing::load_mtp_module(&store, &config, gpu.as_ref()) {
+                Ok(module) => module,
+                Err(error) => {
+                    tracing::error!("Ling MTP module load FAILED: {error:#}");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
     // Capability warning: user asked for `--speculative` but the model has no
     // MTP head bundled, so speculative decoding will silently no-op. Surface
     // this loudly so the user knows the flag was inert.
-    if use_speculative && mtp_weights.is_empty() {
+    if use_speculative
+        && mtp_weights.is_empty()
+        && v4_mtp_module.is_none()
+        && bailing_mtp_module.is_none()
+    {
         tracing::warn!(
             "`--speculative` was requested but no MTP weights were loaded for this \
              model — speculative decoding will be disabled. Either drop `--speculative` \
@@ -591,6 +608,24 @@ pub fn build_model(
             Err(e) => tracing::warn!(
                 "Failed to build DeepSeek-V4 MTP proposer: {e:#}. Speculative decoding disabled."
             ),
+        }
+    }
+
+    if let Some(module) = bailing_mtp_module {
+        match crate::layers::BailingMtpHead::new(
+            module,
+            v4_mtp_embed,
+            v4_mtp_lm_head,
+            model.config_ref(),
+            model.gpu_backend(),
+            mtp_vocab_size,
+            max_seq_len,
+        ) {
+            Ok(head) => {
+                model.set_dflash_proposer(std::sync::Arc::new(head));
+                tracing::info!("Ling 3.0 NEXTN speculative decoding: ENABLED (physical layer 42)");
+            }
+            Err(error) => tracing::warn!("Failed to build Ling MTP proposer: {error:#}"),
         }
     }
 

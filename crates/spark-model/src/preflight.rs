@@ -61,7 +61,7 @@ pub fn preflight(store: &WeightStore, config: &ModelConfig, use_speculative: boo
     // rather than ignoring extra MTP layers is MiniMax — but the check
     // itself is discovery-based, not name-based.
     if use_speculative && max_layer_idx + 1 > config.num_hidden_layers {
-        check_mtp_consumability(config)?;
+        check_mtp_consumability(store, config)?;
     }
 
     tracing::info!("Pre-flight checks passed");
@@ -105,15 +105,17 @@ fn check_embedding_and_head(store: &WeightStore) -> Result<()> {
     // Scan discovery-based so future families that adopt yet-another
     // spelling only need to appear as a new suffix here — no enumerated
     // prefix list to maintain.
-    const EMBED_SUFFIXES: &[&str] = &[".embed_tokens.weight", ".embeddings.weight"];
+    const EMBED_SUFFIXES: &[&str] = &[
+        ".embed_tokens.weight",
+        ".embeddings.weight",
+        ".word_embeddings.weight",
+    ];
     const EMBED_EXACTS: &[&str] = &[
         "tok_embeddings.weight",
         "embed_tokens.weight",
         "embed.weight",
     ];
-    let has_embed = store
-        .names()
-        .any(|n| EMBED_EXACTS.contains(&n) || EMBED_SUFFIXES.iter().any(|s| n.ends_with(s)));
+    let has_embed = store.names().any(is_embedding_name);
     if !has_embed {
         let sample: Vec<_> = store.names().take(20).collect();
         bail!(
@@ -138,6 +140,37 @@ fn check_embedding_and_head(store: &WeightStore) -> Result<()> {
         tracing::info!("Pre-flight: no dedicated LM head tensor; assuming tied embeddings.");
     }
     Ok(())
+}
+
+fn is_embedding_name(name: &str) -> bool {
+    const SUFFIXES: &[&str] = &[
+        ".embed_tokens.weight",
+        ".embeddings.weight",
+        ".word_embeddings.weight",
+    ];
+    const EXACTS: &[&str] = &[
+        "tok_embeddings.weight",
+        "embed_tokens.weight",
+        "embed.weight",
+    ];
+    EXACTS.contains(&name) || SUFFIXES.iter().any(|suffix| name.ends_with(suffix))
+}
+
+#[cfg(test)]
+mod embedding_name_tests {
+    use super::is_embedding_name;
+
+    #[test]
+    fn accepts_bailing_word_embeddings() {
+        assert!(is_embedding_name("model.word_embeddings.weight"));
+    }
+
+    #[test]
+    fn rejects_projection_with_embedding_in_its_name() {
+        assert!(!is_embedding_name(
+            "model.layers.0.word_embeddings.weight_scale"
+        ));
+    }
 }
 
 /// Detect the highest per-layer index present in the store by scanning
@@ -274,7 +307,7 @@ fn extract_expert_idx(name: &str) -> Option<usize> {
 /// This function stays discovery-based: when new families grow MTP
 /// support, add an entry in `MTP_SUPPORTED_MODEL_TYPES` below and it
 /// works without further preflight surgery.
-fn check_mtp_consumability(config: &ModelConfig) -> Result<()> {
+fn check_mtp_consumability(store: &WeightStore, config: &ModelConfig) -> Result<()> {
     const MTP_SUPPORTED_MODEL_TYPES: &[&str] = &[
         "qwen3_next",
         "qwen3_5_moe",
@@ -282,7 +315,36 @@ fn check_mtp_consumability(config: &ModelConfig) -> Result<()> {
         "holo3_1_moe",
         "qwen3_vl_moe",
         "qwen3_coder_next",
+        "bailing_hybrid",
     ];
+    if config.model_type == "bailing_hybrid" {
+        if config.num_nextn_predict_layers == 0 {
+            bail!(
+                "Pre-flight: Ling checkpoint has an extra transformer layer but \
+                 config.num_nextn_predict_layers=0, so Atlas cannot identify it as NEXTN."
+            );
+        }
+        let prefix = format!("model.layers.{}", config.num_hidden_layers);
+        let required = [
+            format!("{prefix}.eh_proj.weight"),
+            format!("{prefix}.enorm.weight"),
+            format!("{prefix}.hnorm.weight"),
+            format!("{prefix}.final_layernorm.weight"),
+        ];
+        let missing: Vec<_> = required
+            .iter()
+            .filter(|name| !store.contains(name))
+            .cloned()
+            .collect();
+        if !missing.is_empty() {
+            bail!(
+                "Pre-flight: Ling NEXTN layer {} is missing required bridge tensors: {:?}",
+                config.num_hidden_layers,
+                missing,
+            );
+        }
+        return Ok(());
+    }
     if MTP_SUPPORTED_MODEL_TYPES.contains(&config.model_type.as_str()) {
         return Ok(());
     }

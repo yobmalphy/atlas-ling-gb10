@@ -240,16 +240,19 @@ impl Qwen3AttentionLayer {
         let gpu = c.fwd.gpu;
         let buffers = c.fwd.buffers;
 
-        // ── Step 1: Q latent → norm → expand ──
+        // ── Step 1: latent MLA or Ling direct-Q ──
         let q_latent = buffers.ssm_ba();
+        let q_full = buffers.ssm_deinterleaved();
+        let q_first_out = if mla.direct_q { q_full } else { q_latent };
+        let q_first_dim = if mla.direct_q { d.q_dim } else { d.q_lora };
         if let Some(ref wqa_nvfp4) = mla.wq_a_nvfp4 {
             self.nvfp4_decode_gemv(
                 gpu,
                 c.fwd.levers.gemv_sw,
                 normed,
                 wqa_nvfp4,
-                q_latent,
-                d.q_lora,
+                q_first_out,
+                q_first_dim,
                 d.h,
                 stream,
             )?;
@@ -259,46 +262,47 @@ impl Qwen3AttentionLayer {
                 self.dense_gemv_k,
                 normed,
                 &mla.wq_a,
-                q_latent,
-                d.q_lora,
+                q_first_out,
+                q_first_dim,
                 d.h,
                 stream,
             )?;
         }
-        ops::rms_norm(
-            gpu,
-            self.rms_norm_w_k,
-            q_latent,
-            &mla.q_a_norm,
-            q_latent,
-            1,
-            d.q_lora,
-            d.eps,
-            stream,
-        )?;
-        let q_full = buffers.ssm_deinterleaved();
-        if let Some(ref wqb_nvfp4) = mla.wq_b_nvfp4 {
-            self.nvfp4_decode_gemv(
+        if !mla.direct_q {
+            ops::rms_norm(
                 gpu,
-                c.fwd.levers.gemv_sw,
+                self.rms_norm_w_k,
                 q_latent,
-                wqb_nvfp4,
-                q_full,
-                d.q_dim,
+                &mla.q_a_norm,
+                q_latent,
+                1,
                 d.q_lora,
+                d.eps,
                 stream,
             )?;
-        } else {
-            ops::dense_gemv(
-                gpu,
-                self.dense_gemv_k,
-                q_latent,
-                &mla.wq_b,
-                q_full,
-                d.q_dim,
-                d.q_lora,
-                stream,
-            )?;
+            if let Some(ref wqb_nvfp4) = mla.wq_b_nvfp4 {
+                self.nvfp4_decode_gemv(
+                    gpu,
+                    c.fwd.levers.gemv_sw,
+                    q_latent,
+                    wqb_nvfp4,
+                    q_full,
+                    d.q_dim,
+                    d.q_lora,
+                    stream,
+                )?;
+            } else {
+                ops::dense_gemv(
+                    gpu,
+                    self.dense_gemv_k,
+                    q_latent,
+                    &mla.wq_b,
+                    q_full,
+                    d.q_dim,
+                    d.q_lora,
+                    stream,
+                )?;
+            }
         }
 
         // ── Step 2: Q_absorbed (Q_nope @ W_UK_T) ──
@@ -394,7 +398,11 @@ impl Qwen3AttentionLayer {
         )?;
         ops::rope_yarn(
             gpu,
-            self.rope_yarn_k,
+            if mla.direct_q {
+                self.rope_yarn_interleaved_k
+            } else {
+                self.rope_yarn_k
+            },
             q_rope_direct,
             k_rope_single,
             meta.positions,
@@ -404,7 +412,7 @@ impl Qwen3AttentionLayer {
             d.mla_rope,
             d.mla_rope,
             mla.yarn_inv_freq,
-            c.fwd.config.rope_theta as f32,
+            crate::layers::qwen3_attention::helpers::yarn_rope_mscale(c.fwd.config),
             stream,
         )?;
         if self.mla_q_rope_writeback_k.0 != 0 {
@@ -506,6 +514,33 @@ impl Qwen3AttentionLayer {
         // need; writing `v_extracted` there would clobber them.
         let v_extracted = buffers.ssm_qkvz();
         self.ms_mla_v_extract(c, mla, &d, attn_out, v_extracted, stream)?;
+
+        if mla.direct_q
+            && let Some(ref gate_weight) = self.head_gate_weight
+        {
+            let gate = buffers.ssm_deinterleaved();
+            ops::dense_gemv(
+                gpu,
+                self.dense_gemv_k,
+                normed,
+                gate_weight,
+                gate,
+                d.nq,
+                d.h,
+                stream,
+            )?;
+            ops::sigmoid_gate_mul_head_broadcast(
+                gpu,
+                self.sigmoid_gate_head_broadcast_k,
+                v_extracted,
+                gate,
+                v_extracted,
+                d.nq,
+                d.mla_v_dim,
+                1,
+                stream,
+            )?;
+        }
 
         // ── Step 8: O projection → this seq's o_out slot ──
         if d.o_lora_rank > 0 {

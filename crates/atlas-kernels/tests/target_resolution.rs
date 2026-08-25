@@ -129,6 +129,60 @@ fn resolve_name(model_type: &str, hidden: usize, refs: &[&str]) -> Option<&'stat
         .map(|i| parsed[i].name)
 }
 
+#[test]
+fn ling30_nvfp4_mtp_resolves_to_native_bailing_target() {
+    assert_eq!(
+        resolve_name(
+            "bailing_hybrid",
+            2560,
+            &["kingjones777/Ling-3.0-flash-NVFP4-SGLang-MTP"]
+        ),
+        Some("ling-3.0-flash")
+    );
+}
+
+/// Ling's MLA constructor probes the generic FP8 HDIM-512 sibling because
+/// `kv_lora_rank=512`, but the Bailing decode path dispatches the native MLA
+/// kernel instead.  Keep that non-live probe explicit so FP8 long-context
+/// startup fails closed for a genuinely missing kernel, not this sibling.
+#[test]
+fn ling30_declares_generic_fp8_512_decode_probe_expected_absent() {
+    let path = gb10_dir().join("ling-3.0-flash").join("MODEL.toml");
+    let text = std::fs::read_to_string(&path).expect("readable Ling MODEL.toml");
+    let toml: toml::Value = toml::from_str(&text).expect("valid Ling MODEL.toml");
+    let reason = toml
+        .get("expected_absent")
+        .and_then(|v| v.get("paged_decode_attn_fp8_512"))
+        .and_then(|v| v.get("paged_decode_attn_fp8"))
+        .and_then(|v| v.as_str())
+        .expect("Ling must declare its non-live generic FP8 512 probe");
+    assert!(
+        reason.contains("MLA decode"),
+        "unexpected rationale: {reason}"
+    );
+}
+
+/// Every MoE layer constructor probes Ling's optional clamped-SwiGLU
+/// activation, but ordinary Qwen/Ornith checkpoints leave both clamp limits
+/// at zero and therefore never dispatch it.  Keep the non-live probe explicit
+/// so unresolved-kernel validation can remain fail-closed for live paths.
+#[test]
+fn qwen36_35b_declares_ling_clamp_probe_expected_absent() {
+    let path = gb10_dir().join("qwen3.6-35b-a3b").join("MODEL.toml");
+    let text = std::fs::read_to_string(&path).expect("readable Qwen 35B MODEL.toml");
+    let toml: toml::Value = toml::from_str(&text).expect("valid Qwen 35B MODEL.toml");
+    let reason = toml
+        .get("expected_absent")
+        .and_then(|v| v.get("kda"))
+        .and_then(|v| v.get("ling_silu_mul_clamped"))
+        .and_then(|v| v.as_str())
+        .expect("Qwen 35B must declare the non-live Ling clamp probe");
+    assert!(
+        reason.contains("clamp limits remain zero"),
+        "unexpected rationale: {reason}"
+    );
+}
+
 // ── The dense-27B family ──
 
 #[test]

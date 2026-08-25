@@ -166,6 +166,9 @@ pub struct MoeLayer {
     moe_silu_mul: KernelHandle,
     /// Activation kernel for sorted/unfused path. SiLU by default, GeGLU for Gemma-4.
     moe_act_mul: KernelHandle,
+    ling_silu_mul_clamped: KernelHandle,
+    routed_swiglu_limit: f32,
+    shared_swiglu_limit: f32,
     /// When true, decode uses the sorted prefill path (avoids fused SiLU kernels).
     gelu_activation: bool,
     moe_unpermute_reduce: KernelHandle,
@@ -424,6 +427,45 @@ pub struct MoeLayer {
 }
 
 impl MoeLayer {
+    pub fn set_swiglu_limits(&mut self, routed: f32, shared: f32) {
+        self.routed_swiglu_limit = routed;
+        self.shared_swiglu_limit = shared;
+    }
+
+    fn activate(
+        &self,
+        gate: DevicePtr,
+        up: DevicePtr,
+        output: DevicePtr,
+        elements: u32,
+        limit: f32,
+        ctx: &ForwardContext,
+        stream: u64,
+    ) -> Result<()> {
+        if limit > 0.0 {
+            ops::silu_mul_clamped(
+                ctx.gpu,
+                self.ling_silu_mul_clamped,
+                gate,
+                up,
+                output,
+                elements,
+                limit,
+                stream,
+            )
+        } else {
+            ops::silu_mul(
+                ctx.gpu,
+                self.moe_act_mul,
+                gate,
+                up,
+                output,
+                elements,
+                stream,
+            )
+        }
+    }
+
     /// ARM-2 Phase-K routed-expert kernel-handle select. Returns the E8M0
     /// variant when the routed experts are native MXFP4 (`Mxfp4E8m0`), else the
     /// NVFP4 handle. Panics if E8M0 is selected but the `_e8m0` kernel is

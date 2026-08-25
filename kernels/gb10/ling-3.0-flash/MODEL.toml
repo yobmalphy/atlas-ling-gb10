@@ -1,0 +1,118 @@
+[model]
+name = "ling-3.0-flash"
+hf_id = "kingjones777/Ling-3.0-flash-NVFP4-SGLang-MTP"
+params = "~35B"
+active_params = "~4B"
+architecture = "Bailing Hybrid KDA + MLA + 512-expert MoE + MTP"
+match_names = ["ling-3.0-flash-nvfp4-sglang-mtp", "ling-3.0-flash"]
+
+layers_total = 42
+layers_linear_attention = 35
+layers_full_attention = 7
+hidden_dim = 2560
+head_dim = 128
+q_heads = 32
+kv_heads = 32
+vocab_size = 157184
+
+moe_experts = 512
+moe_topk = 8
+moe_router_groups = 8
+moe_router_topk_groups = 4
+mtp_layers = 1
+
+[[model_types]]
+model_type = "bailing_hybrid"
+hidden_size = 2560
+
+[sampling.thinking_text]
+temperature = 0.6
+top_p = 0.95
+top_k = 20
+
+[sampling.thinking_coding]
+temperature = 0.6
+top_p = 0.95
+top_k = 20
+
+[sampling.non_thinking]
+temperature = 0.6
+top_p = 0.95
+top_k = 20
+
+[sampling.tools]
+temperature = 0.6
+top_p = 0.95
+top_k = 20
+
+[behavior]
+thinking_default = true
+# Required tool grammar begins at the first generated token. Bailing's chat
+# template otherwise leaves the generation cursor inside <think>, causing a
+# valid native tool envelope to be classified as reasoning instead of an
+# executable call. Keep normal-answer thinking enabled, but render tool turns
+# after a closed <think></think> block.
+thinking_in_tools = false
+default_kv_dtype = "bf16"
+tool_call_parser = "glm45"
+default_num_drafts = 2
+
+[kernel]
+# hidden_dim(2560) * sizeof(bf16)
+moe_gate_shmem_bytes = 5120
+
+# Optional constructor probes; every entry is gated or falls back to a
+# required sibling. Ling's live path is compressed-tensors NVFP4 W4A16/KDA/MLA.
+[expected_absent.inferspark_prefill_512]
+inferspark_prefill_512 = "512-wide probe; Ling uses native MLA prefill."
+[expected_absent.inferspark_prefill_512tc]
+inferspark_prefill_512tc = "512-wide probe; Ling uses native MLA prefill."
+[expected_absent.paged_decode_attn_512]
+paged_decode_attn = "512-wide probe; Ling uses native MLA decode."
+[expected_absent.paged_decode_attn_fp8_512]
+paged_decode_attn_fp8 = """
+Generic HDIM-512 FP8-KV probe. Ling sets kv_lora_rank=512, which enables the
+shared wide-shape constructor probe, but its real attention head_dim is 128
+and Bailing layers dispatch the native MLA decode path. The generic dispatch
+sites additionally require head_dim > 256, so this sibling cannot execute.
+"""
+[expected_absent.moe_w4a16]
+moe_w4a16_grouped_gemm_ptrtable_e8m0 = "MXFP4 probe; Ling uses NVFP4 sibling."
+moe_w4a16_grouped_gemm_ptrtable_t_e8m0 = "MXFP4 probe; Ling uses NVFP4 sibling."
+moe_w4a16_grouped_gemm_ptrtable_t_k64_e8m0 = "MXFP4 probe; Ling uses NVFP4 sibling."
+moe_w4a16_fused_gate_up_t_e8m0 = "MXFP4 probe; Ling uses NVFP4 sibling."
+moe_w4a16_fused_gate_up_t_k64_e8m0 = "MXFP4 probe; Ling uses NVFP4 sibling."
+moe_w4a16_fused_gate_up_t_k64_m128 = "Optional M128 probe; falls back to resolved M64."
+[expected_absent.w4a16]
+w4a16_gemm_t_p3 = "Optional pipeline probe; base GEMM resolves."
+w4a16_gemm_t_k64_p3 = "Optional pipeline probe; base K64 resolves."
+w4a16_gemm_t_k64_n64_p3 = "Optional narrow-N probe; handle is gated."
+w4a16_gemm_t_m128_bf16 = "Optional BF16 prefill twin."
+w4a16_gemm_t_m128_bf16_v2 = "Optional BF16 prefill twin."
+int8_gemm_faith2 = "INT8 experiment; Ling is NVFP4."
+int8_gemm_i32acc = "INT8 experiment; Ling is NVFP4."
+requant_a_bf16_int8 = "INT8 experiment; Ling is NVFP4."
+requant_w_nvfp4_int8 = "INT8 experiment; native W4A16 resolves."
+[expected_absent.w4a4]
+w4a4_gemm = "W4A4 probe; Ling is W4A16."
+w4a4_gemm_mfast = "W4A4 probe; Ling is W4A16."
+[expected_absent.q4k_mmq]
+atlas_q4k_mmq128_nc = "GGUF Q4_K probe; Ling is safetensors NVFP4."
+atlas_q4k_mmq128_wc = "GGUF Q4_K probe; Ling is safetensors NVFP4."
+atlas_q8_1_quantize_ds4_bf16 = "GGUF Q4_K staging probe."
+[expected_absent.q4k_quantize]
+q4k_quantize = "GGUF Q4_K quantizer probe."
+[expected_absent.nvfp4_mmq]
+atlas_nvfp4_mmq128_nc = "GGUF MMQ probe; Ling uses W4A16."
+atlas_nvfp4_mmq128_wc = "GGUF MMQ probe; Ling uses W4A16."
+atlas_nvfp4_mmq16_nc = "GGUF MMQ probe; Ling uses W4A16."
+atlas_nvfp4_mmq16_wc = "GGUF MMQ probe; Ling uses W4A16."
+atlas_nvfp4_mmq32_nc = "GGUF MMQ probe; Ling uses W4A16."
+atlas_nvfp4_mmq32_wc = "GGUF MMQ probe; Ling uses W4A16."
+atlas_nvfp4_mmq64_nc = "GGUF MMQ probe; Ling uses W4A16."
+atlas_nvfp4_mmq64_wc = "GGUF MMQ probe; Ling uses W4A16."
+atlas_nvfp4_quantize_bf16 = "GGUF MMQ staging probe."
+atlas_nvfp4_repack = "GGUF MMQ repack probe."
+atlas_nvfp4_scale_bf16 = "GGUF MMQ staging probe."
+atlas_nvfp4_silu_mul_quant = "GGUF MMQ activation probe."
+atlas_nvfp4_silu_mul_scaled = "GGUF MMQ activation probe."

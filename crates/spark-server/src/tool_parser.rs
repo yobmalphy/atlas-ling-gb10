@@ -409,9 +409,11 @@ impl std::str::FromStr for ToolCallFormat {
             "minimax_xml" => Ok(Self::MinimaxXml),
             "deepseek_v4" | "dsml" => Ok(Self::DeepseekV4),
             "bare_json" => Ok(Self::BareJson),
-            "poolside_v1" => Ok(Self::PoolsideV1),
+            // Ling/GLM-4.5 uses the same native wire contract as Poolside v1:
+            // <tool_call>NAME<arg_key>K</arg_key><arg_value>V</arg_value>.
+            "poolside_v1" | "glm45" => Ok(Self::PoolsideV1),
             other => Err(format!(
-                "Unknown tool call parser '{other}'. Supported: hermes, qwen3_coder, qwen3_xml, gemma4, mistral, minimax_xml, deepseek_v4, bare_json, poolside_v1",
+                "Unknown tool call parser '{other}'. Supported: hermes, qwen3_coder, qwen3_xml, gemma4, mistral, minimax_xml, deepseek_v4, bare_json, poolside_v1, glm45",
             )),
         }
     }

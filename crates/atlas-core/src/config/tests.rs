@@ -7,6 +7,79 @@
 use super::*;
 
 #[test]
+fn bailing_hybrid_maps_ling_kda_mla_moe_and_nextn_contract() {
+    let mut expert_limits = vec![0; 42];
+    expert_limits[35..].fill(4);
+    let mut shared_limits = vec![0; 42];
+    shared_limits[34..40].fill(5);
+    shared_limits[40..].fill(7);
+    let json = serde_json::json!({
+        "model_type": "bailing_hybrid",
+        "hidden_size": 2560,
+        "num_hidden_layers": 42,
+        "intermediate_size": 6144,
+        "vocab_size": 157184,
+        "num_attention_heads": 32,
+        "num_key_value_heads": 32,
+        "head_dim": 128,
+        "partial_rotary_factor": 0.5,
+        "layer_group_size": 6,
+        "short_conv_kernel_size": 4,
+        "first_k_dense_replace": 2,
+        "num_experts": 512,
+        "num_experts_per_tok": 8,
+        "moe_intermediate_size": 768,
+        "num_shared_experts": 1,
+        "moe_shared_expert_intermediate_size": 768,
+        "n_group": 8,
+        "topk_group": 4,
+        "scoring_func": "sigmoid",
+        "moe_router_enable_expert_bias": true,
+        "routed_scaling_factor": 2.5,
+        "kv_lora_rank": 512,
+        "q_lora_rank": null,
+        "qk_head_dim": 192,
+        "qk_nope_head_dim": 128,
+        "qk_rope_head_dim": 64,
+        "v_head_dim": 128,
+        "rope_interleave": true,
+        "gated_attention_proj_granularity_type": "head_wise",
+        "kda_lower_bound": -5.0,
+        "kda_safe_gate": true,
+        "no_kda_lora": true,
+        "num_nextn_predict_layers": 1,
+        "expert_swiglu_limit_list": expert_limits,
+        "share_expert_swiglu_limit_list": shared_limits,
+        "max_position_embeddings": 262144,
+        "rope_theta": 6000000.0,
+        "rms_norm_eps": 1e-6,
+        "eos_token_id": 156895
+    });
+
+    let cfg = parse_config(&json.to_string()).unwrap();
+    assert_eq!(cfg.model_type, "bailing_hybrid");
+    assert_eq!(cfg.weight_prefix, "model");
+    assert_eq!(cfg.num_ssm_layers(), 35);
+    assert_eq!(cfg.num_attention_layers(), 7);
+    assert_eq!(cfg.layer_type(4), LayerType::LinearAttention);
+    assert_eq!(cfg.layer_type(5), LayerType::FullAttention);
+    assert_eq!(cfg.layer_type(41), LayerType::FullAttention);
+    assert_eq!(cfg.linear_num_key_heads, 32);
+    assert_eq!(cfg.linear_key_head_dim, 128);
+    assert_eq!(cfg.ssm_ba_size(), 4096 + 32);
+    assert_eq!(cfg.shared_expert_intermediate_size, 768);
+    assert_eq!(cfg.moe_router_groups, 8);
+    assert_eq!(cfg.moe_router_topk_groups, 4);
+    assert!(cfg.use_routing_bias);
+    assert_eq!(cfg.q_lora_rank, 0);
+    assert_eq!(cfg.qk_head_dim, 192);
+    assert_eq!(cfg.mtp_num_hidden_layers, 1);
+    assert_eq!(cfg.num_mtp_modules, 1);
+    assert_eq!(cfg.expert_swiglu_limit_list[35], 4.0);
+    assert_eq!(cfg.share_expert_swiglu_limit_list[40], 7.0);
+}
+
+#[test]
 fn qwen3_next_factory_preserves_attention_ssm_and_routing_shape() {
     let cfg = ModelConfig::qwen3_next_80b_nvfp4();
     assert_eq!(cfg.hidden_size, 2048);

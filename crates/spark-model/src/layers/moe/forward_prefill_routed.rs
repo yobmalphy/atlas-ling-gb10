@@ -351,13 +351,13 @@ impl MoeLayer {
                 ctx,
                 stream,
             )?;
-            ops::silu_mul(
-                ctx.gpu,
-                self.moe_act_mul,
+            self.activate(
                 expert_gate_out,
                 expert_up_out,
                 expert_gate_out,
                 total_expanded * inter,
+                self.routed_swiglu_limit,
+                ctx,
                 stream,
             )?;
             // ── FP4 down (ATLAS_HOLO_MOE_DOWN_FP4) ── single block-scaled FP4

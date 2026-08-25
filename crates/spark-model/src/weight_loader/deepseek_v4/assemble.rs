@@ -456,6 +456,7 @@ pub fn assemble_layer(
     let wkv_a_fp8 = load_fp8_mla("wkv");
 
     let mla = MlaWeights {
+        direct_q: false,
         wq_a,
         wq_a_nvfp4,
         wq_a_fp8,

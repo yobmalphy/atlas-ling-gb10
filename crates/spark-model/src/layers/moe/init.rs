@@ -268,6 +268,9 @@ impl MoeLayer {
             fp8_gemm_k: gpu.kernel("w4a16", "fp8_gemm_t")?,
             moe_silu_mul: gpu.kernel("moe_silu_mul", "moe_silu_mul")?,
             moe_act_mul: gpu.kernel("moe_silu_mul", "moe_silu_mul")?, // default: SiLU
+            ling_silu_mul_clamped: super::super::try_kernel(gpu, "kda", "ling_silu_mul_clamped"),
+            routed_swiglu_limit: 0.0,
+            shared_swiglu_limit: 0.0,
             gelu_activation: false,
             moe_unpermute_reduce: gpu.kernel("moe", "moe_unpermute_reduce_indexed")?,
             moe_batched_blend: gpu.kernel("moe", "moe_batched_blend")?,

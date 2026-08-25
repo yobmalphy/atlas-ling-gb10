@@ -36,6 +36,29 @@ pub fn silu_mul(
         .launch(stream)
 }
 
+/// Ling SwiGLU with the checkpoint's layer-specific clamp contract.
+/// `gate` is clamped before SiLU and `up` before multiplication.
+pub fn silu_mul_clamped(
+    gpu: &dyn GpuBackend,
+    kernel: KernelHandle,
+    gate: DevicePtr,
+    up: DevicePtr,
+    output: DevicePtr,
+    num_elements: u32,
+    limit: f32,
+    stream: u64,
+) -> Result<()> {
+    KernelLaunch::new(gpu, kernel)
+        .grid([div_ceil(num_elements, 256), 1, 1])
+        .block([256, 1, 1])
+        .arg_ptr(gate)
+        .arg_ptr(up)
+        .arg_ptr(output)
+        .arg_u32(num_elements)
+        .arg_f32(limit)
+        .launch(stream)
+}
+
 /// Fused SiLU·mul + per-token-group(128) FP8-E4M3 quantization — replaces the
 /// `silu_mul` → `per_token_group_quant_fp8` pair on the W8A8 prefill down-path
 /// without materializing the BF16 intermediate. Bit-identical to the pair

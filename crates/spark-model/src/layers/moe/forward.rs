@@ -31,6 +31,14 @@ impl MoeLayer {
         ctx: &ForwardContext,
         stream: u64,
     ) -> Result<DevicePtr> {
+        if self.routed_swiglu_limit > 0.0 || self.shared_swiglu_limit > 0.0 {
+            anyhow::ensure!(
+                self.ling_silu_mul_clamped.0 != 0,
+                "Ling SwiGLU clamp kernel is missing from this Atlas target"
+            );
+            self.forward_prefill(input, 1, ctx, stream)?;
+            return Ok(ctx.buffers.moe_output());
+        }
         // SOLID Incr-4: a genuine single-token decode (num_seqs == 1) folds the
         // routed expert down_proj LoRA delta below (before the wsum blend). The
         // multi-seq per-token reuse of this fn (num_seqs > 1 — decode_batch's

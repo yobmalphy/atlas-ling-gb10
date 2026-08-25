@@ -53,6 +53,7 @@ use spark_runtime::gpu::DevicePtr;
 
 use super::super::types::TransformerModel;
 use crate::layer::ForwardContext;
+use crate::layers::ops;
 use crate::traits::SequenceState;
 
 /// `ATLAS_NO_MTP_EAGER_DRAFTER` (PRESENCE): restore the propose-site-only
@@ -142,12 +143,27 @@ impl TransformerModel {
         }
         let h = self.config.hidden_size;
         let bf16 = 2usize;
-        self.gpu.copy_d2d_async(
-            src,
-            self.mtp_prefill_hidden.offset(chunk_start * h * bf16),
-            proc_count * h * bf16,
-            stream,
-        )?;
+        let dst = self.mtp_prefill_hidden.offset(chunk_start * h * bf16);
+        if self.config.model_type == "bailing_hybrid" {
+            // Ling layer 42 consumes the base model's post-final-norm hidden
+            // (then applies its own hnorm). The target prefill capture point
+            // is before final_norm, so normalize directly into the dedicated
+            // capture buffer. Other MTP families keep their raw-hidden ABI.
+            ops::rms_norm(
+                self.gpu.as_ref(),
+                self.rms_norm_kernel,
+                src,
+                &self.final_norm,
+                dst,
+                proc_count as u32,
+                h as u32,
+                self.config.rms_norm_eps as f32,
+                stream,
+            )?;
+        } else {
+            self.gpu
+                .copy_d2d_async(src, dst, proc_count * h * bf16, stream)?;
+        }
         if let Some(new_len) = contiguous_from_zero {
             self.mtp_prefill_capture_len
                 .store(new_len, Ordering::Relaxed);

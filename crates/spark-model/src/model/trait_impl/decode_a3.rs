@@ -51,6 +51,21 @@ impl TransformerModel {
                 ctx,
                 stream,
             )?;
+            if !use_graphs && let Ok(dir) = std::env::var("ATLAS_DECODE_DUMP") {
+                self.gpu.synchronize(stream)?;
+                let mut bf16 = vec![0u8; self.config.hidden_size * 2];
+                self.gpu.copy_d2h(hidden, &mut bf16)?;
+                let mut f32_bytes = Vec::with_capacity(self.config.hidden_size * 4);
+                for pair in bf16.chunks_exact(2) {
+                    let bits = u16::from_le_bytes([pair[0], pair[1]]) as u32;
+                    f32_bytes.extend_from_slice(&f32::from_bits(bits << 16).to_le_bytes());
+                }
+                std::fs::create_dir_all(&dir)?;
+                std::fs::write(
+                    std::path::Path::new(&dir).join(format!("atlas_decode_all_L{i}.bin")),
+                    f32_bytes,
+                )?;
+            }
             // CBD per-layer hidden fingerprint at decode step 0 (eager only).
             // Localizes the FIRST layer whose post-layer hidden diverges
             // cold-vs-ON / ON-vs-ON → pins the bug to that layer's read set.

@@ -74,6 +74,7 @@ pub(super) fn assemble_layer(
     let wq_a_dense = require(ctx.wq_a_dense, "wq_a_dense")?;
     let wkv_a_dense = require(ctx.wkv_a_dense, "wkv_a_dense")?;
     let mla_weights = MlaWeights {
+        direct_q: false,
         wq_a: wq_a_dense,
         wq_a_fp8: None,
         wq_a_nvfp4: if disable_nvfp4_mla {

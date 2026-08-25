@@ -285,6 +285,19 @@ fn tool_call_format_from_str_qwen3_xml() {
     assert_eq!(fmt.name(), "qwen3_xml");
 }
 
+#[test]
+fn glm45_alias_uses_arg_key_arg_value_parser() {
+    let fmt = "glm45".parse::<ToolCallFormat>().unwrap();
+    assert_eq!(fmt.name(), "poolside_v1");
+    let (content, calls) = parse_tool_calls(
+        "<tool_call>search<arg_key>query</arg_key><arg_value>Mars</arg_value></tool_call>",
+    );
+    assert!(content.is_none());
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].function.name, "search");
+    assert_eq!(calls[0].function.arguments, r#"{"query":"Mars"}"#);
+}
+
 // ── empty-key repair (CC plan-mode ExitPlanMode loop fix, 2026-06-07) ──
 
 fn exitplanmode_tool() -> ToolDefinition {

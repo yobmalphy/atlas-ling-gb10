@@ -285,10 +285,17 @@ impl TransformerModel {
         let h = self.config.hidden_size;
         // Residual stream is always BF16, so the saved hidden is BF16.
         let fp32 = 2usize;
-        // Save the RAW hidden state (before final_norm), not norm_output.
-        // The MTP head applies its own pre_fc_norm_hidden — passing norm_output
-        // would double-normalize and degrade prediction accuracy.
-        let src = self.buffers.hidden_states().offset(token_idx * h * fp32);
+        // Qwen-shaped MTP heads consume the raw pre-final-norm hidden and
+        // apply their own pre_fc_norm_hidden. Bailing/Ling's physical NEXTN
+        // layer is different: the reference model calls the base model's
+        // final norm first, then feeds that result through layer-42 hnorm.
+        // `norm_output` still contains the base final-norm rows here.
+        let src_base = if self.config.model_type == "bailing_hybrid" {
+            self.buffers.norm_output()
+        } else {
+            self.buffers.hidden_states()
+        };
+        let src = src_base.offset(token_idx * h * fp32);
         self.gpu
             .copy_d2d_async(src, self.mtp_hidden_save, h * fp32, stream)?;
         self.last_mtp_hidden_idx
@@ -296,12 +303,13 @@ impl TransformerModel {
         Ok(())
     }
 
-    /// Batched-verify Phase 2: copy the raw-hidden row `rows[i]` (the
+    /// Batched-verify Phase 2: copy the proposer-input row `rows[i]` (the
     /// accepted position of sequence i in the just-run batched verify
     /// forward) into stash slot i, BEFORE any propose clobbers the shared
     /// `hidden_states` buffer (every drafter `forward_one` writes into it —
     /// mtp_multi.rs). Same RAW-hidden (pre-final-norm) contract as
-    /// `save_hidden_for_mtp_dispatch`.
+    /// `save_hidden_for_mtp_dispatch`. Bailing/Ling stashes post-final-norm
+    /// rows; the existing MTP families retain their raw-hidden contract.
     pub(super) fn stash_verify_hidden_rows_dispatch(
         &self,
         rows: &[usize],
@@ -321,7 +329,12 @@ impl TransformerModel {
         let h = self.config.hidden_size;
         let bf16 = 2usize; // residual stream is BF16
         for (i, &row) in rows.iter().enumerate() {
-            let src = self.buffers.hidden_states().offset(row * h * bf16);
+            let src_base = if self.config.model_type == "bailing_hybrid" {
+                self.buffers.norm_output()
+            } else {
+                self.buffers.hidden_states()
+            };
+            let src = src_base.offset(row * h * bf16);
             let dst = self.verify_hidden_stash.offset(i * h * bf16);
             self.gpu.copy_d2d_async(src, dst, h * bf16, stream)?;
         }
@@ -369,7 +382,12 @@ impl TransformerModel {
         let stream = self.gpu.default_stream();
         let h = self.config.hidden_size;
         let bf16 = 2usize;
-        let src = self.buffers.hidden_states().offset(token_idx * h * bf16);
+        let src_base = if self.config.model_type == "bailing_hybrid" {
+            self.buffers.norm_output()
+        } else {
+            self.buffers.hidden_states()
+        };
+        let src = src_base.offset(token_idx * h * bf16);
         let dst = self.mtp_catchup_ring.offset((pos % ring_rows) * h * bf16);
         self.gpu.copy_d2d_async(src, dst, h * bf16, stream)?;
         if crate::speculative::mtp_refeed_debug() {

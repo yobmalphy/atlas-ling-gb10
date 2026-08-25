@@ -134,13 +134,13 @@ impl MoeLayer {
         }
 
         // Shared activation (SiLU or GeGLU) + down GEMM on aux stream
-        ops::silu_mul(
-            ctx.gpu,
-            self.moe_act_mul,
+        self.activate(
             shared_gate_out,
             shared_up_out,
             shared_gate_out,
             n * shared_inter,
+            self.shared_swiglu_limit,
+            ctx,
             aux,
         )?;
         if let Some(sd_fp8) = self.shared_down_fp8 {
