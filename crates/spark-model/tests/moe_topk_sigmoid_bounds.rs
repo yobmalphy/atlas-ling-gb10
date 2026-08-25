@@ -12,14 +12,16 @@
 //! tie-break the common file carries, so one model's decode and its batched
 //! prefill could route identical logits to different experts.
 //!
-//! Both shadows are gone; the whole family builds from `common/` again. These
-//! tests exist so the next copy has to justify itself.
+//! The accidental shadows are gone; Ling's architecture-specific grouped
+//! router is the sole declared exception. These tests make any future copy
+//! justify itself and keep Ling's exception pinned to its routing contract.
 
 use std::path::{Path, PathBuf};
 
 use spark_model::layers::ops::{MOE_TOPK_SIGMOID_MAX_EXPERTS, MOE_TOPK_SIGMOID_MAX_TOP_K};
 
 const KERNEL: &str = "gb10/common/moe_topk_sigmoid.cu";
+const LING_GROUPED_ROUTER: &str = "gb10/ling-3.0-flash/nvfp4/moe_topk_sigmoid.cu";
 
 fn kernels_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -62,9 +64,10 @@ fn rust_bounds_mirror_the_kernel_defines() {
 }
 
 /// A model directory that shadows this kernel gets its own copy of the bounds
-/// AND its own copy of the tie-break, and nothing compares the two. Ban the
-/// shadow rather than trying to diff it: the kernel has no model-specific
-/// content, so a copy is drift by construction.
+/// AND its own copy of the tie-break, and nothing compares the two. Ling is the
+/// sole exception: its architecture requires grouped top-4-of-8 routing, which
+/// cannot use the ungrouped common implementation while retaining the module
+/// name consumed by the generic MoE host path.
 #[test]
 fn no_model_directory_shadows_the_sigmoid_routing_kernel() {
     let root = kernels_root();
@@ -80,6 +83,7 @@ fn no_model_directory_shadows_the_sigmoid_routing_kernel() {
                 stack.push(path);
             } else if path.file_name().is_some_and(|n| n == "moe_topk_sigmoid.cu")
                 && path.parent().is_some_and(|p| !p.ends_with("common"))
+                && path.strip_prefix(&root).ok() != Some(Path::new(LING_GROUPED_ROUTER))
             {
                 shadows.push(
                     path.strip_prefix(&root)
@@ -93,10 +97,19 @@ fn no_model_directory_shadows_the_sigmoid_routing_kernel() {
     shadows.sort();
     assert!(
         shadows.is_empty(),
-        "moe_topk_sigmoid.cu belongs only in a `common/` directory; these copies \
-         will drift in their MAX_TOP_K and their tie-break exactly as the two \
+        "moe_topk_sigmoid.cu belongs only in `common/` or Ling's declared grouped-router; \
+         these copies will drift in their MAX_TOP_K and their tie-break exactly as the two \
          Nemotron ones did: {shadows:?}"
     );
+}
+
+#[test]
+fn ling_shadow_preserves_its_grouped_routing_contract() {
+    let text = std::fs::read_to_string(kernels_root().join(LING_GROUPED_ROUTER)).unwrap();
+    assert!(text.contains("#define NUM_GROUPS 8"));
+    assert!(text.contains("#define TOP_GROUPS 4"));
+    assert!(text.contains("extern \"C\" __global__ void moe_topk_sigmoid("));
+    assert!(text.contains("extern \"C\" __global__ void moe_topk_sigmoid_batched("));
 }
 
 /// Every checkpoint the repo declares must fit the bounds the kernel can hold.
