@@ -156,23 +156,6 @@ fn is_embedding_name(name: &str) -> bool {
     EXACTS.contains(&name) || SUFFIXES.iter().any(|suffix| name.ends_with(suffix))
 }
 
-#[cfg(test)]
-mod embedding_name_tests {
-    use super::is_embedding_name;
-
-    #[test]
-    fn accepts_bailing_word_embeddings() {
-        assert!(is_embedding_name("model.word_embeddings.weight"));
-    }
-
-    #[test]
-    fn rejects_projection_with_embedding_in_its_name() {
-        assert!(!is_embedding_name(
-            "model.layers.0.word_embeddings.weight_scale"
-        ));
-    }
-}
-
 /// Detect the highest per-layer index present in the store by scanning
 /// any tensor matching `*.layers.{N}.*`. Returns the observed max index
 /// so the caller can decide whether extra MTP layers were shipped.
@@ -385,4 +368,21 @@ fn check_correction_bias_shape(store: &WeightStore, config: &ModelConfig) -> Res
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod embedding_name_tests {
+    use super::is_embedding_name;
+
+    #[test]
+    fn accepts_bailing_word_embeddings() {
+        assert!(is_embedding_name("model.word_embeddings.weight"));
+    }
+
+    #[test]
+    fn rejects_projection_with_embedding_in_its_name() {
+        assert!(!is_embedding_name(
+            "model.layers.0.word_embeddings.weight_scale"
+        ));
+    }
 }

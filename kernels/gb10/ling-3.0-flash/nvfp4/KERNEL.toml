@@ -3,6 +3,7 @@
 extra_nvcc_flags = ["--fmad=false"]
 
 [modules]
+ling_grouped_router = "moe_topk_sig"
 e2m1_branchless = "e2m1"
 moe_permute = "moe"
 dense_gemm_bf16 = "gemm"

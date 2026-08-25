@@ -777,6 +777,10 @@ jobs:
   # than on a real defect.
   pr-benchmark-gate:
     name: PR benchmark gate
+    # The upstream governance ledger references private campaign ancestry that
+    # is not part of downstream forks. Keep enforcing it in the canonical
+    # repository; forks publish their own reproducible benchmark evidence.
+    if: github.repository == 'Avarok-Cybersecurity/atlas'
     runs-on: ubuntu-latest
     # Runs under `merge_group` too, deliberately. There the checkout is the
     # queue's temporary merge commit (latest main + this PR), and the gate
